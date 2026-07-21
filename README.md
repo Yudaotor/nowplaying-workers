@@ -1,6 +1,6 @@
 # Web Features: Turn "What's Playing" Into a Page You Can Share
 
-**Language / 语言：** **English** | [简体中文](web-features.zh-CN.md)
+**Language / 语言：** **English** | [简体中文](README.zh-CN.md)
 
 This document covers one thing: **the public now-playing web page that collector unlocks as a bonus** — what it actually looks like, how data flows, and how to stand up your own copy from scratch.
 
@@ -56,7 +56,7 @@ Mac collector (already running)
 
 ### Prerequisite
 
-You already have collector running per the main [README](../README.md) (even just a basic `-dry-run` trial run is enough). You don't need ListenBrainz configured to continue — the web page can run entirely on state-worker's own KV storage without depending on ListenBrainz (with one exception: "recent playback history" is only available via ListenBrainz, since state-worker doesn't keep its own history store — see "What This Can't Do" below).
+You already have Lyrimuse's collector running (even just a basic `-dry-run` trial run is enough) — see the main Lyrimuse app's own README for that part; it's a separate project/repo from this one. You don't need ListenBrainz configured to continue — the web page can run entirely on state-worker's own KV storage without depending on ListenBrainz (with one exception: "recent playback history" is only available via ListenBrainz, since state-worker doesn't keep its own history store — see "What This Can't Do" below).
 
 ### Step 1: Deploy your own state-worker
 

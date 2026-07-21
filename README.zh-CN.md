@@ -1,6 +1,6 @@
 # 网页玩法：把"正在听什么"做成一个能分享的网页
 
-**语言 / Language：** [English](web-features.md) | **简体中文**
+**语言 / Language：** [English](README.md) | **简体中文**
 
 这篇文档只讲一件事：**collector 顺带解锁的网页展示页**——效果长什么样、数据怎么流动、怎么从零搭一套自己的。
 
@@ -56,7 +56,7 @@ Mac 采集器(collector, 已经在跑)
 
 ### 前提
 
-已经按主 [README](../README.zh-CN.md) 把 collector 跑起来了（哪怕只是最基础的 `-dry-run` 试跑）。不需要配置 ListenBrainz 才能往下走——网页也可以完全靠 state-worker 自己的 KV 工作，不依赖 ListenBrainz（除了「历史播放」这一项，只有 ListenBrainz 能提供，state-worker 没有自己的历史存储，见下方「有什么做不到」）。
+已经把 Lyrimuse 的 collector 跑起来了（哪怕只是最基础的 `-dry-run` 试跑）——这部分参照 Lyrimuse App 自己那份 README，是独立于本仓库的另一个项目。不需要配置 ListenBrainz 才能往下走——网页也可以完全靠 state-worker 自己的 KV 工作，不依赖 ListenBrainz（除了「历史播放」这一项，只有 ListenBrainz 能提供，state-worker 没有自己的历史存储，见下方「有什么做不到」）。
 
 ### 第一步：部署自己的 state-worker
 
