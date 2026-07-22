@@ -1,0 +1,5 @@
+# wrangler 本地开发的 secret(PUSH_TOKEN/ADMIN_TOKEN 等真实值),绝不能进仓库
+.dev.vars
+.wrangler/
+node_modules/
+.DS_Store
