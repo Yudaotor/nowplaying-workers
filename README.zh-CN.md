@@ -8,6 +8,7 @@
 
 ![Cloudflare Workers](https://img.shields.io/badge/%E8%BF%90%E8%A1%8C%E5%9C%A8-Cloudflare%20Workers-f38020)
 ![Free tier](https://img.shields.io/badge/%E6%88%90%E6%9C%AC-%E5%85%8D%E8%B4%B9%E9%A2%9D%E5%BA%A6%E5%AE%8C%E5%85%A8%E5%A4%9F%E7%94%A8-success)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 [**在线效果 →**](https://yudaotor.github.io/nowplaying/?user=yudaotor)
 

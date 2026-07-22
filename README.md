@@ -8,6 +8,7 @@
 
 ![Cloudflare Workers](https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020)
 ![Free tier](https://img.shields.io/badge/cost-free%20tier%20is%20plenty-success)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 [**See it live →**](https://yudaotor.github.io/nowplaying/?user=yudaotor)
 
