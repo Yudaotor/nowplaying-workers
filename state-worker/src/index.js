@@ -378,7 +378,7 @@ async function lbHistory(env) {
   const listens = re?.payload?.listens || [];
   return listens.map((l) => {
     const m = l.track_metadata || {}, ai = m.additional_info || {};
-    return { title: m.track_name, artist: m.artist_name || "", listenedAt: l.listened_at,
+    return { title: m.track_name, artist: m.artist_name || "", album: m.release_name || "", listenedAt: l.listened_at,
       durationMs: typeof ai.duration_ms === "number" ? ai.duration_ms : null,
       device: ai.source || "", // 来源:mac / iphone(采集器打的 source 标),供历史列表标设备
       url: ai.apple_music_url || ai.netease_url || ai.qq_music_url || "" };
