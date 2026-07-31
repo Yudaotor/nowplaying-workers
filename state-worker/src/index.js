@@ -5,10 +5,14 @@
 //
 //   POST /push         body=完整状态 JSON,需 x-token == PUSH_TOKEN → 写 KV "current"
 //   GET  /now          → 读 "current"(空/过期则兜底 LB playing-now)
-//   GET  /history      → 读 "history"(空则兜底 LB listens)
+//   GET  /history      → 直接读 LB listens 归一化(不走 KV,采集器已不再写 KV "history",
+//                        见下面 /history 分支旁边的注释)
 //   POST /top-artists  body={artists,updatedAt},需 x-token == PUSH_TOKEN → 写 KV "top-artists"
 //   GET  /top-artists  → 读 "top-artists"(采集器一天推一次,见 collector/topartists.go;
 //                        没有兜底源——KV 为空就返回空数组,等采集器下一次推送)
+//   GET  /month-counts → 近30天每首歌播放次数(artist|title -> n),读 KV "month-counts"
+//                        缓存(15分钟),没有/过期则翻页 LB listens 重新算(2026-07-31 从
+//                        网页搬过来,详见该分支旁边的注释)
 //
 // Env: PUSH_TOKEN(secret,采集器共享)、LB_USER(兜底用)、WEB_PAGE_URL(/share 跳转目标)。
 // KV 绑定名 NP_STATE。
@@ -57,6 +61,8 @@ const CUR_KEY = "current";
 const STALE_MS = 5 * 60 * 1000; // current 超过 5 分钟没更新 → 视为过期,转 LB 兜底。调短:KV 写配额爆时(采集器 /push 全 503、心跳也写不进)冻结的 KV 能更快退回 LB 显示当前在放,而非卡到 20 分钟。代价:正常期长歌/长暂停(> 5min 无 KV 更新)也会更早退 LB(LB 有同曲 playing_now、略糙)。彻底解法是 KV 别再爆(减写/付费)。
 const HIST_MAX = 200;
 const TOP_ARTISTS_KEY = "top-artists"; // 历史播放 Top10 歌手,采集器一天推一次(见文件头注释)
+const MONTH_COUNTS_KEY = "month-counts"; // 近30天每首歌播放次数,见 /month-counts 端点注释
+const MONTH_COUNTS_TTL_MS = 15 * 60 * 1000;
 const WEB_CONFIG_KEY = "web-config"; // 网页模块可见性配置,单独于 CUR_KEY 的 durable key(见上方文件头注释)
 
 const VISITS_KEY = "visits:total";
@@ -74,7 +80,7 @@ const CORS = {
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const kv = env.NP_STATE || null;
 
@@ -164,6 +170,44 @@ export default {
       const resp = { ok: true, items: merged.slice(0, HIST_MAX), source: "lb" };
       if (histErr) resp.error = histErr;
       return json(resp);
+    }
+
+    // ---- 近30天每首歌播放次数(2026-07-31 从网页搬过来)----
+    // 网页历史列表"30天"那一列,原来是浏览器自己直连 LB 翻页统计(最多翻 15 页拿全近30
+    // 天数据)——国内直连 LB 本来就慢(这也是这整个 relay 存在的理由),浏览器发起还要
+    // 顺序等每一页依次返回,用户反馈体感非常慢。
+    // ⚠️ 一开始想的是"挪到这里同步算完再返回",实测坐实行不通:这个账号听歌历史够长,
+    // 翻满 15 页顺序请求 LB 实测要 ~39s(直接打 workers.dev 裸域名能等到它算完),但自定义
+    // 域名(np.yudaotor.me)那条路径会在 ~5s 左右就先返回 502——像是 Cloudflare 给自定义
+    // 域名走的代理层本身有一层比 Worker 自己执行时间更短的网关超时,不是我这边 await 的
+    // AbortSignal 触发的(那个已经调到 8s/页、且单页失败会 break 用部分结果,不会导致这
+    // 种整体 502)。不管这层超时具体是什么,同步等最多 39s 再返回,对网页来说也谈不上
+    // "快"——于是改成 stale-while-revalidate:命中新鲜缓存直接返回;缓存过期/没有,直接
+    // 把"当前 KV 里有什么(哪怕是过期的旧值,没有就是空)"先返回给这次请求,同时用
+    // ctx.waitUntil 在后台起一次真正的翻页计算,算完写回 KV——下一个请求(哪怕是几百毫秒
+    // 后)就能拿到新结果,不需要每次都有人"运气不好"等最多 39s。用一个短 TTL 的 KV 锁
+    // (REFRESH_LOCK_KEY)避免同一刷新窗口内多个并发请求各自重复起一次翻页,白白多打 LB。
+    if (url.pathname === "/month-counts") {
+      let cached = null;
+      if (kv) {
+        try { cached = await kv.get(MONTH_COUNTS_KEY, { type: "json" }); } catch (e) { /* 当没有缓存处理 */ }
+      }
+      const fresh = cached && cached.at && Date.now() - cached.at < MONTH_COUNTS_TTL_MS;
+      if (!fresh && kv) {
+        ctx.waitUntil((async () => {
+          try {
+            const lockKey = "month-counts:refreshing";
+            const locked = await kv.get(lockKey);
+            if (locked) return; // 已经有一次刷新在跑,不重复起
+            await kv.put(lockKey, "1", { expirationTtl: 90 }); // 90s 兜底:万一刷新本身卡死也不会永久锁住
+            const counts = await monthCounts(env);
+            await kv.put(MONTH_COUNTS_KEY, JSON.stringify({ counts, at: Date.now() }));
+            await kv.delete(lockKey);
+          } catch (e) { /* 后台刷新失败:保留旧缓存(如果有),下个请求会再触发一次 */ }
+        })());
+      }
+      if (cached) return json({ ok: true, counts: cached.counts, at: cached.at, stale: !fresh });
+      return json({ ok: true, counts: {}, at: 0, stale: true }); // 从没成功算过一次:先给空的,后台已经在算了
     }
 
     // ---- 历史播放 Top10 歌手(采集器一天推一次,见文件头注释)----
@@ -384,6 +428,41 @@ async function lbHistory(env) {
       url: ai.apple_music_url || ai.netease_url || ai.qq_music_url || "" };
   }).filter((x) => x.title);
 }
+// 近30天(artist|title -> 次数)聚合,供 /month-counts 端点用。逻辑照搬网页原来
+// getMonthCounts() 客户端翻页那份(翻到 30 天前的截止时间,或最多 15 页),只是执行
+// 位置从浏览器搬到这里——同一个算法,换个更快的网络环境跑。
+async function monthCounts(env) {
+  const user = env.LB_USER || "yudaotor";
+  const cutoff = Math.floor((Date.now() - 30 * 86400000) / 1000);
+  const counts = {};
+  let maxTs = null;
+  for (let i = 0; i < 15; i++) {
+    const url = maxTs
+      ? `${LB_API}/1/user/${encodeURIComponent(user)}/listens?count=100&max_ts=${maxTs}`
+      : `${LB_API}/1/user/${encodeURIComponent(user)}/listens?count=100`;
+    let page;
+    try {
+      // 8s(而不是 getJSON 默认的 3s):这里一次要顺序翻最多 15 页,单页偶尔慢一点很
+      // 正常,3s 对这种链路式请求太紧——实测坐实过一次因为某一页超时直接整体 502,
+      // 一条统计都拿不到(2026-07-31)。翻页中途某一页真的还是超时/失败,直接用已经
+      // 拿到的那几页统计,好过完全没有——不让个别页面的失败拖垮整体。
+      const re = await getJSON(url, 8000);
+      page = re?.payload?.listens || [];
+    } catch (e) { break; }
+    if (!page.length) break;
+    let hitCutoff = false;
+    for (const l of page) {
+      if ((l.listened_at || 0) < cutoff) { hitCutoff = true; continue; }
+      const m = l.track_metadata;
+      if (!m || !m.track_name) continue;
+      const key = `${m.artist_name || ""}|${m.track_name}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    maxTs = page[page.length - 1].listened_at || 0;
+    if (hitCutoff || page.length < 100) break; // 已跨过 30 天前 / 没有更早的了
+  }
+  return counts;
+}
 // fromLB 把 ListenBrainz 原始 listen 归一化成 /now 的响应形状。
 // ⚠️ web/index.html 的 fetchState() 里有一份几乎逐字段相同的拷贝(它直连 LB 兜底用,
 // 字段基本一致,就是没有 ok、且这边叫 device 那边叫 source——那边是给 paint() 直接消费,
@@ -403,8 +482,8 @@ function fromLB(l, playing, listenedAt) {
     durationMs: num(ai.duration_ms), progressMs: num(ai.progress_ms), progressTs: num(ai.progress_ts), rate: num(ai.playback_rate),
   };
 }
-async function getJSON(u) {
-  const r = await fetch(u, { headers: { "user-agent": "nowplaying-state-relay" }, signal: AbortSignal.timeout(3000) });
+async function getJSON(u, timeoutMs) {
+  const r = await fetch(u, { headers: { "user-agent": "nowplaying-state-relay" }, signal: AbortSignal.timeout(timeoutMs || 3000) });
   if (!r.ok) throw new Error(`${u} -> ${r.status}`);
   return r.json();
 }
