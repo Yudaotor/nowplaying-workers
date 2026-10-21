@@ -96,11 +96,11 @@ function clip(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 
 export async function buildSVG(snap) {
   const W = 400, H = 120;
   if (!snap || !snap.title) {
-    return card({ W, H, accent: "#5b6472", cover: "", statusText: "🎧 这会儿没在听歌", title: "—", artist: "", playing: false, prog: null });
+    return card({ W, H, accent: "#5b6472", cover: "", statusText: "🎧 Not listening right now", title: "—", artist: "", playing: false, prog: null });
   }
   const accent = /^#[0-9a-fA-F]{6}$/.test(snap.accent) ? snap.accent : "#8a5cff";
   const dev = snap.source === "iphone" ? "📱" : snap.source === "mac" ? "💻" : "";
-  const statusText = (snap.playing ? "正在播放" : "上次播放") + (dev ? " " + dev : "");
+  const statusText = (snap.playing ? "Now playing" : "Last played") + (dev ? " " + dev : "");
   const cover = await coverDataURI(snap.cover);
   return card({ W, H, accent, cover, statusText, title: snap.title, artist: snap.artist, playing: snap.playing, prog: progressFrac(snap) });
 }
